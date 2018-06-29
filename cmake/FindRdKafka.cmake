@@ -1,3 +1,7 @@
+if (CPPKAFKA_RDKAFKA_STATIC_LIB)
+	add_definitions(-DLIBRDKAFKA_STATICLIB)
+endif()
+
 find_path(RDKAFKA_ROOT_DIR
     NAMES include/librdkafka/rdkafka.h
 )
