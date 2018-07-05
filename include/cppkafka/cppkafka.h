@@ -27,36 +27,38 @@
  *
  */
 
-#include <algorithm>
-#include "utils/backoff_committer.h"
+#ifndef CPPKAFKA_H
+#define CPPKAFKA_H
 
-using std::min;
+#include <cppkafka/buffer.h>
+#include <cppkafka/clonable_ptr.h>
+#include <cppkafka/configuration.h>
+#include <cppkafka/configuration_base.h>
+#include <cppkafka/configuration_option.h>
+#include <cppkafka/consumer.h>
+#include <cppkafka/error.h>
+#include <cppkafka/exceptions.h>
+#include <cppkafka/group_information.h>
+#include <cppkafka/kafka_handle_base.h>
+#include <cppkafka/logging.h>
+#include <cppkafka/macros.h>
+#include <cppkafka/message.h>
+#include <cppkafka/message_builder.h>
+#include <cppkafka/message_internal.h>
+#include <cppkafka/metadata.h>
+#include <cppkafka/producer.h>
+#include <cppkafka/queue.h>
+#include <cppkafka/topic.h>
+#include <cppkafka/topic_configuration.h>
+#include <cppkafka/topic_partition.h>
+#include <cppkafka/topic_partition_list.h>
+#include <cppkafka/utils/backoff_committer.h>
+#include <cppkafka/utils/backoff_performer.h>
+#include <cppkafka/utils/buffered_producer.h>
+#include <cppkafka/utils/compacted_topic_processor.h>
+#include <cppkafka/utils/consumer_dispatcher.h>
+#include <cppkafka/utils/poll_interface.h>
+#include <cppkafka/utils/poll_strategy_base.h>
+#include <cppkafka/utils/roundrobin_poll_strategy.h>
 
-namespace cppkafka {
-
-BackoffCommitter::BackoffCommitter(Consumer& consumer)
-: consumer_(consumer) {
-
-}
-
-void BackoffCommitter::set_error_callback(ErrorCallback callback) {
-    callback_ = move(callback);
-}
-
-void BackoffCommitter::commit(const Message& msg) {
-    perform([&] { 
-        return do_commit(msg);
-    });
-}
-
-void BackoffCommitter::commit(const TopicPartitionList& topic_partitions) {
-    perform([&] { 
-        return do_commit(topic_partitions);
-    });
-}
-
-Consumer& BackoffCommitter::get_consumer() {
-    return consumer_;
-}
-
-} // cppkafka
+#endif

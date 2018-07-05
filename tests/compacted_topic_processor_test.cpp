@@ -4,10 +4,11 @@
 #include <set>
 #include <map>
 #include <condition_variable>
-#include <gtest/gtest.h>
-#include "cppkafka/producer.h"
+#include <catch.hpp>
+#include "cppkafka/utils/buffered_producer.h"
 #include "cppkafka/consumer.h"
 #include "cppkafka/utils/compacted_topic_processor.h"
+#include "test_utils.h"
 
 using std::string;
 using std::to_string;
@@ -29,28 +30,21 @@ using std::chrono::milliseconds;
 
 using namespace cppkafka;
 
-class CompactedTopicProcessorTest : public testing::Test {
-public:
-    static const string KAFKA_TOPIC;
+static Configuration make_producer_config() {
+    Configuration config;
+    config.set("metadata.broker.list", KAFKA_TEST_INSTANCE);
+    return config;
+}
 
-    Configuration make_producer_config() {
-        Configuration config;
-        config.set("metadata.broker.list", KAFKA_TEST_INSTANCE);
-        return config;
-    }
+static Configuration make_consumer_config() {
+    Configuration config;
+    config.set("metadata.broker.list", KAFKA_TEST_INSTANCE);
+    config.set("enable.auto.commit", false);
+    config.set("group.id", "compacted_topic_test");
+    return config;
+}
 
-    Configuration make_consumer_config() {
-        Configuration config;
-        config.set("metadata.broker.list", KAFKA_TEST_INSTANCE);
-        config.set("enable.auto.commit", false);
-        config.set("group.id", "compacted_topic_test");
-        return config;
-    }
-};
-
-const string CompactedTopicProcessorTest::KAFKA_TOPIC = "cppkafka_test1";
-
-TEST_F(CompactedTopicProcessorTest, Consume) {
+TEST_CASE("consumption", "[consumer][compacted]") {
     Consumer consumer(make_consumer_config());
     // We'll use ints as the key, strings as the value
     using CompactedConsumer = CompactedTopicProcessor<int, string>;
@@ -70,12 +64,16 @@ TEST_F(CompactedTopicProcessorTest, Consume) {
     compacted_consumer.set_event_handler([&](const Event& event) {
         events.push_back(event);
     });
-    consumer.subscribe({ KAFKA_TOPIC });
-    consumer.poll();
-    consumer.poll();
-    consumer.poll();
+    consumer.subscribe({ KAFKA_TOPICS[0] });
+    set<int> eof_partitions;
+    while (eof_partitions.size() != static_cast<size_t>(KAFKA_NUM_PARTITIONS)) {
+        Message msg = consumer.poll();
+        if (msg && msg.is_eof()) {
+            eof_partitions.insert(msg.get_partition());
+        }
+    }
 
-    Producer producer(make_producer_config());
+    BufferedProducer<string> producer(make_producer_config());
 
     struct ElementType {
         string value;
@@ -87,13 +85,14 @@ TEST_F(CompactedTopicProcessorTest, Consume) {
     };
     for (const auto& element_pair : elements) { 
         const ElementType& element = element_pair.second;
-        MessageBuilder builder(KAFKA_TOPIC);
+        MessageBuilder builder(KAFKA_TOPICS[0]);
         builder.partition(element.partition).key(element_pair.first).payload(element.value);
         producer.produce(builder);
     }
     // Now erase the first element
     string deleted_key = "42";
-    producer.produce(MessageBuilder(KAFKA_TOPIC).partition(0).key(deleted_key));
+    producer.produce(MessageBuilder(KAFKA_TOPICS[0]).partition(0).key(deleted_key));
+    producer.flush();
 
     for (size_t i = 0; i < 10; ++i) {
         compacted_consumer.process_event();
@@ -101,27 +100,27 @@ TEST_F(CompactedTopicProcessorTest, Consume) {
 
     size_t set_count = 0;
     size_t delete_count = 0;
-    ASSERT_FALSE(events.empty());
+    CHECK(events.empty() == false);
     for (const Event& event : events) {
         switch (event.get_type()) {
             case Event::SET_ELEMENT:
                 {
                     auto iter = elements.find(to_string(event.get_key()));
-                    ASSERT_NE(iter, elements.end());
-                    EXPECT_EQ(iter->second.value, event.get_value());
-                    EXPECT_EQ(iter->second.partition, event.get_partition());
+                    REQUIRE(iter != elements.end());
+                    CHECK(iter->second.value == event.get_value());
+                    CHECK(iter->second.partition == event.get_partition());
                     set_count++;
                 }
                 break;
             case Event::DELETE_ELEMENT:
-                EXPECT_EQ(0, event.get_partition());
-                EXPECT_EQ(42, event.get_key());
+                CHECK(event.get_partition() == 0);
+                CHECK(event.get_key() == 42);
                 delete_count++;
                 break;
             default:
             break;
         } 
     }
-    EXPECT_EQ(2, set_count);
-    EXPECT_EQ(1, delete_count);
+    CHECK(set_count == 2);
+    CHECK(delete_count == 1);
 }

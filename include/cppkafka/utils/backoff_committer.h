@@ -33,8 +33,10 @@
 #include <chrono>
 #include <functional>
 #include <thread>
+#include <string>
 #include "../consumer.h"
 #include "backoff_performer.h"
+#include "../detail/callback_invoker.h"
 
 namespace cppkafka {
 
@@ -74,7 +76,7 @@ public:
     /**
      * \brief The error callback.
      * 
-     * Whenever an error occurs comitting an offset, this callback will be executed using
+     * Whenever an error occurs committing an offset, this callback will be executed using
      * the generated error. While the function returns true, then this is offset will be
      * committed again until it either succeeds or the function returns false.
      */
@@ -96,8 +98,7 @@ public:
      * \param callback The callback to be set
      */
     void set_error_callback(ErrorCallback callback);
-
-
+    
     /**
      * \brief Commits the given message synchronously
      *
@@ -117,7 +118,15 @@ public:
      * \param topic_partitions The topic/partition list to be committed
      */
     void commit(const TopicPartitionList& topic_partitions);
+    
+    /**
+     * \brief Get the internal Consumer object
+     *
+     * \return A reference to the Consumer
+     */
+    Consumer& get_consumer();
 private:
+    // Return true to abort and false to continue committing
     template <typename T>
     bool do_commit(const T& object) {
         try {
@@ -131,13 +140,11 @@ private:
             if (ex.get_error() == RD_KAFKA_RESP_ERR__NO_OFFSET) {
                 return true;
             }
-            // If there's a callback and it returns false for this message, abort
-            if (callback_ && !callback_(ex.get_error())) {
-                return true;
-            }
+            // If there's a callback and it returns false for this message, abort.
+            // Otherwise keep committing.
+            CallbackInvoker<ErrorCallback> callback("backoff committer", callback_, &consumer_);
+            return callback && !callback(ex.get_error());
         }
-        // In any other case, we failed. Keep committing
-        return false;
     }
 
     Consumer& consumer_;

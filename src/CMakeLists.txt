@@ -5,7 +5,9 @@ set(SOURCES
     exceptions.cpp
     topic.cpp
     buffer.cpp
+    queue.cpp
     message.cpp
+    message_internal.cpp
     topic_partition.cpp
     topic_partition_list.cpp
     metadata.cpp
@@ -18,6 +20,8 @@ set(SOURCES
 
     utils/backoff_performer.cpp
     utils/backoff_committer.cpp
+    utils/poll_strategy_base.cpp
+    utils/roundrobin_poll_strategy.cpp
 )
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../include/cppkafka)

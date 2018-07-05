@@ -48,7 +48,7 @@ namespace cppkafka {
 const milliseconds KafkaHandleBase::DEFAULT_TIMEOUT{1000};
 
 KafkaHandleBase::KafkaHandleBase(Configuration config) 
-: handle_(nullptr, nullptr), timeout_ms_(DEFAULT_TIMEOUT), config_(move(config)) {
+: timeout_ms_(DEFAULT_TIMEOUT), config_(move(config)), handle_(nullptr, nullptr) {
     auto& maybe_config = config_.get_default_topic_configuration();
     if (maybe_config) {
         maybe_config->set_as_opaque();
@@ -61,14 +61,22 @@ void KafkaHandleBase::pause_partitions(const TopicPartitionList& topic_partition
     TopicPartitionsListPtr topic_list_handle = convert(topic_partitions);
     rd_kafka_resp_err_t error = rd_kafka_pause_partitions(get_handle(), 
                                                           topic_list_handle.get());
-    check_error(error);
+    check_error(error, topic_list_handle.get());
+}
+
+void KafkaHandleBase::pause(const std::string& topic) {
+    pause_partitions(convert(topic, get_metadata(get_topic(topic)).get_partitions()));
 }
 
 void KafkaHandleBase::resume_partitions(const TopicPartitionList& topic_partitions) {
     TopicPartitionsListPtr topic_list_handle = convert(topic_partitions);
     rd_kafka_resp_err_t error = rd_kafka_resume_partitions(get_handle(), 
                                                            topic_list_handle.get());
-    check_error(error);
+    check_error(error, topic_list_handle.get());
+}
+
+void KafkaHandleBase::resume(const std::string& topic) {
+    resume_partitions(convert(topic, get_metadata(get_topic(topic)).get_partitions()));
 }
 
 void KafkaHandleBase::set_timeout(milliseconds timeout) {
@@ -145,7 +153,7 @@ KafkaHandleBase::get_offsets_for_times(const TopicPartitionsTimestampsMap& queri
     const int timeout = static_cast<int>(timeout_ms_.count());
     rd_kafka_resp_err_t result = rd_kafka_offsets_for_times(handle_.get(), topic_list_handle.get(),
                                                             timeout);
-    check_error(result);
+    check_error(result, topic_list_handle.get());
     return convert(topic_list_handle);
 }
 
@@ -163,6 +171,10 @@ const Configuration& KafkaHandleBase::get_configuration() const {
 
 int KafkaHandleBase::get_out_queue_length() const {
     return rd_kafka_outq_len(handle_.get());
+}
+
+void KafkaHandleBase::yield() const {
+    rd_kafka_yield(handle_.get());
 }
 
 void KafkaHandleBase::set_handle(rd_kafka_t* handle) {
@@ -213,6 +225,21 @@ void KafkaHandleBase::save_topic_config(const string& topic_name, TopicConfigura
 void KafkaHandleBase::check_error(rd_kafka_resp_err_t error) const {
     if (error != RD_KAFKA_RESP_ERR_NO_ERROR) {
         throw HandleException(error);
+    }
+}
+
+void KafkaHandleBase::check_error(rd_kafka_resp_err_t error,
+                                  const rd_kafka_topic_partition_list_t* list_ptr) const {
+    if (error != RD_KAFKA_RESP_ERR_NO_ERROR) {
+        throw HandleException(error);
+    }
+    if (list_ptr) {
+        //check if any partition has errors
+        for (int i = 0; i < list_ptr->cnt; ++i) {
+            if (list_ptr->elems[i].err != RD_KAFKA_RESP_ERR_NO_ERROR) {
+                throw HandleException(error);
+            }
+        }
     }
 }
 

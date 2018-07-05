@@ -27,36 +27,23 @@
  *
  */
 
-#include <algorithm>
-#include "utils/backoff_committer.h"
-
-using std::min;
+#ifndef CPPKAFKA_LOGGING_H
+#define CPPKAFKA_LOGGING_H
 
 namespace cppkafka {
 
-BackoffCommitter::BackoffCommitter(Consumer& consumer)
-: consumer_(consumer) {
+// Based on syslog.h levels
+enum class LogLevel : int {
+    LOG_EMERG   = 0,    /* system is unusable */
+    LOG_ALERT   = 1,    /* action must be taken immediately */
+    LOG_CRIT    = 2,    /* critical conditions */
+    LOG_ERR     = 3,    /* error conditions */
+    LOG_WARNING = 4,    /* warning conditions */
+    LOG_NOTICE  = 5,    /* normal but significant condition */
+    LOG_INFO    = 6,    /* informational */
+    LOG_DEBUG   = 7     /* debug-level messages */
+};
 
-}
+} //cppkafka
 
-void BackoffCommitter::set_error_callback(ErrorCallback callback) {
-    callback_ = move(callback);
-}
-
-void BackoffCommitter::commit(const Message& msg) {
-    perform([&] { 
-        return do_commit(msg);
-    });
-}
-
-void BackoffCommitter::commit(const TopicPartitionList& topic_partitions) {
-    perform([&] { 
-        return do_commit(topic_partitions);
-    });
-}
-
-Consumer& BackoffCommitter::get_consumer() {
-    return consumer_;
-}
-
-} // cppkafka
+#endif //CPPKAFKA_LOGGING_H

@@ -5,7 +5,7 @@
 #include <chrono>
 #include <iterator>
 #include <condition_variable>
-#include <gtest/gtest.h>
+#include <catch.hpp>
 #include "cppkafka/consumer.h"
 #include "cppkafka/producer.h"
 #include "cppkafka/utils/consumer_dispatcher.h"
@@ -29,28 +29,21 @@ using std::chrono::system_clock;
 
 using namespace cppkafka;
 
-class ConsumerTest : public testing::Test {
-public:
-    static const string KAFKA_TOPIC;
+static Configuration make_producer_config() {
+    Configuration config;
+    config.set("metadata.broker.list", KAFKA_TEST_INSTANCE);
+    return config;
+}
 
-    Configuration make_producer_config() {
-        Configuration config;
-        config.set("metadata.broker.list", KAFKA_TEST_INSTANCE);
-        return config;
-    }
+static Configuration make_consumer_config(const string& group_id = "consumer_test") {
+    Configuration config;
+    config.set("metadata.broker.list", KAFKA_TEST_INSTANCE);
+    config.set("enable.auto.commit", false);
+    config.set("group.id", group_id);
+    return config;
+}
 
-    Configuration make_consumer_config(const string& group_id = "consumer_test") {
-        Configuration config;
-        config.set("metadata.broker.list", KAFKA_TEST_INSTANCE);
-        config.set("enable.auto.commit", false);
-        config.set("group.id", group_id);
-        return config;
-    }
-};
-
-const string ConsumerTest::KAFKA_TOPIC = "cppkafka_test1";
-
-TEST_F(ConsumerTest, AssignmentCallback) {
+TEST_CASE("message consumption", "[consumer]") {
     TopicPartitionList assignment;
     int partition = 0;
 
@@ -59,37 +52,37 @@ TEST_F(ConsumerTest, AssignmentCallback) {
     consumer.set_assignment_callback([&](const TopicPartitionList& topic_partitions) {
         assignment = topic_partitions;
     });
-    consumer.subscribe({ KAFKA_TOPIC });
-    ConsumerRunner runner(consumer, 1, 3);
+    consumer.subscribe({ KAFKA_TOPICS[0] });
+    ConsumerRunner runner(consumer, 1, KAFKA_NUM_PARTITIONS);
 
     // Produce a message just so we stop the consumer
     Producer producer(make_producer_config());
     string payload = "Hello world!";
-    producer.produce(MessageBuilder(KAFKA_TOPIC).partition(partition).payload(payload));
+    producer.produce(MessageBuilder(KAFKA_TOPICS[0]).partition(partition).payload(payload));
     runner.try_join();
 
-    // All 3 partitions should be ours
-    EXPECT_EQ(3, assignment.size());
-    set<int> partitions = { 0, 1, 2 }; 
+    // All partitions should be ours
+    REQUIRE(assignment.size() == KAFKA_NUM_PARTITIONS);
+    set<int> partitions;
+    for (int i = 0; i < KAFKA_NUM_PARTITIONS; partitions.emplace(i++));
     for (const auto& topic_partition : assignment) {
-        EXPECT_EQ(KAFKA_TOPIC, topic_partition.get_topic());
-        EXPECT_TRUE(partitions.erase(topic_partition.get_partition()));
+        CHECK(topic_partition.get_topic() == KAFKA_TOPICS[0]);
+        CHECK(partitions.erase(topic_partition.get_partition()) == true);
     }
-    EXPECT_EQ(1, runner.get_messages().size());
-
-    EXPECT_EQ(vector<string>{ KAFKA_TOPIC }, consumer.get_subscription());
+    REQUIRE(runner.get_messages().size() == 1);
+    CHECK(consumer.get_subscription() == vector<string>{ KAFKA_TOPICS[0] });
 
     assignment = consumer.get_assignment();
-    EXPECT_EQ(3, assignment.size());
+    CHECK(assignment.size() == KAFKA_NUM_PARTITIONS);
 
     int64_t low;
     int64_t high;
-    tie(low, high) = consumer.get_offsets({ KAFKA_TOPIC, partition });
-    EXPECT_GT(high, low);
-    EXPECT_EQ(high, runner.get_messages().back().get_offset() + 1);
+    tie(low, high) = consumer.get_offsets({ KAFKA_TOPICS[0], partition });
+    CHECK(high > low);
+    CHECK(runner.get_messages().back().get_offset() + 1 == high);
 }
 
-TEST_F(ConsumerTest, Rebalance) {
+TEST_CASE("consumer rebalance", "[consumer]") {
     TopicPartitionList assignment1;
     TopicPartitionList assignment2;
     bool revocation_called = false;
@@ -103,41 +96,42 @@ TEST_F(ConsumerTest, Rebalance) {
     consumer1.set_revocation_callback([&](const TopicPartitionList&) {
         revocation_called = true;
     });
-    consumer1.subscribe({ KAFKA_TOPIC });
-    ConsumerRunner runner1(consumer1, 1, 3);
+    consumer1.subscribe({ KAFKA_TOPICS[0] });
+    ConsumerRunner runner1(consumer1, 1, KAFKA_NUM_PARTITIONS);
 
     // Create a second consumer and subscribe to the topic
     Consumer consumer2(make_consumer_config());
     consumer2.set_assignment_callback([&](const TopicPartitionList& topic_partitions) {
         assignment2 = topic_partitions;
     });
-    consumer2.subscribe({ KAFKA_TOPIC });
+    consumer2.subscribe({ KAFKA_TOPICS[0] });
     ConsumerRunner runner2(consumer2, 1, 1);
 
-    EXPECT_TRUE(revocation_called);
+    CHECK(revocation_called == true);
 
     // Produce a message just so we stop the consumer
     Producer producer(make_producer_config());
     string payload = "Hello world!";
-    producer.produce(MessageBuilder(KAFKA_TOPIC).partition(partition).payload(payload));
+    producer.produce(MessageBuilder(KAFKA_TOPICS[0]).partition(partition).payload(payload));
     runner1.try_join();
     runner2.try_join();
 
-    // All 3 partitions should be assigned
-    EXPECT_EQ(3, assignment1.size() + assignment2.size());
-    set<int> partitions = { 0, 1, 2 }; 
+    // All partitions should be assigned
+    CHECK(assignment1.size() + assignment2.size() == KAFKA_NUM_PARTITIONS);
+    set<int> partitions;
+    for (int i = 0; i < KAFKA_NUM_PARTITIONS; partitions.emplace(i++));
     for (const auto& topic_partition : assignment1) {
-        EXPECT_EQ(KAFKA_TOPIC, topic_partition.get_topic());
-        EXPECT_TRUE(partitions.erase(topic_partition.get_partition()));
+        CHECK(topic_partition.get_topic() == KAFKA_TOPICS[0]);
+        CHECK(partitions.erase(topic_partition.get_partition()) == true);
     }
     for (const auto& topic_partition : assignment2) {
-        EXPECT_EQ(KAFKA_TOPIC, topic_partition.get_topic());
-        EXPECT_TRUE(partitions.erase(topic_partition.get_partition()));
+        CHECK(topic_partition.get_topic() == KAFKA_TOPICS[0]);
+        CHECK(partitions.erase(topic_partition.get_partition()) == true);
     }
-    EXPECT_EQ(1, runner1.get_messages().size() + runner2.get_messages().size());
+    CHECK(runner1.get_messages().size() + runner2.get_messages().size() == 1);
 }
 
-TEST_F(ConsumerTest, OffsetCommit) {
+TEST_CASE("consumer offset commit", "[consumer]") {
     int partition = 0;
     int64_t message_offset = 0;
     bool offset_commit_called = false;
@@ -147,39 +141,39 @@ TEST_F(ConsumerTest, OffsetCommit) {
     config.set_offset_commit_callback([&](Consumer&, Error error,
                                           const TopicPartitionList& topic_partitions) {
         offset_commit_called = true;
-        EXPECT_FALSE(error);
-        ASSERT_EQ(1, topic_partitions.size());
-        EXPECT_EQ(KAFKA_TOPIC, topic_partitions[0].get_topic());
-        EXPECT_EQ(0, topic_partitions[0].get_partition());
-        EXPECT_EQ(message_offset + 1, topic_partitions[0].get_offset());
+        CHECK(!!error == false);
+        REQUIRE(topic_partitions.size() == 1);
+        CHECK(topic_partitions[0].get_topic() == KAFKA_TOPICS[0]);
+        CHECK(topic_partitions[0].get_partition() == 0);
+        CHECK(topic_partitions[0].get_offset() == message_offset + 1);
     });
     Consumer consumer(config);
-    consumer.assign({ { KAFKA_TOPIC, 0 } });
+    consumer.assign({ { KAFKA_TOPICS[0], 0 } });
     ConsumerRunner runner(consumer, 1, 1);
 
     // Produce a message just so we stop the consumer
     Producer producer(make_producer_config());
     string payload = "Hello world!";
-    producer.produce(MessageBuilder(KAFKA_TOPIC).partition(partition).payload(payload));
+    producer.produce(MessageBuilder(KAFKA_TOPICS[0]).partition(partition).payload(payload));
     runner.try_join();
 
-    ASSERT_EQ(1, runner.get_messages().size());
+    REQUIRE(runner.get_messages().size() == 1);
     const Message& msg = runner.get_messages()[0];
     message_offset = msg.get_offset();
     consumer.commit(msg);
     for (size_t i = 0; i < 3 && !offset_commit_called; ++i) {
         consumer.poll();
     }
-    EXPECT_TRUE(offset_commit_called);
+    CHECK(offset_commit_called == true);
 }
 
-TEST_F(ConsumerTest, Throttle) {
+TEST_CASE("consumer throttle", "[consumer]") {
     int partition = 0;
 
     // Create a consumer and subscribe to the topic
     Configuration config = make_consumer_config("offset_commit");
     Consumer consumer(config);
-    consumer.assign({ { KAFKA_TOPIC, 0 } });
+    consumer.assign({ { KAFKA_TOPICS[0], 0 } });
 
     {
         ConsumerRunner runner(consumer, 0, 1);
@@ -189,7 +183,7 @@ TEST_F(ConsumerTest, Throttle) {
     // Produce a message just so we stop the consumer
     BufferedProducer<string> producer(make_producer_config());
     string payload = "Hello world!";
-    producer.produce(MessageBuilder(KAFKA_TOPIC).partition(partition).payload(payload));
+    producer.produce(MessageBuilder(KAFKA_TOPICS[0]).partition(partition).payload(payload));
     producer.flush();
 
     size_t callback_executed_count = 0;
@@ -210,16 +204,16 @@ TEST_F(ConsumerTest, Throttle) {
         }
     );
 
-    EXPECT_EQ(3, callback_executed_count);
+    CHECK(callback_executed_count == 3);
 }
 
-TEST_F(ConsumerTest, ConsumeBatch) {
+TEST_CASE("consume batch", "[consumer]") {
     int partition = 0;
 
     // Create a consumer and subscribe to the topic
     Configuration config = make_consumer_config("test");
     Consumer consumer(config);
-    consumer.assign({ { KAFKA_TOPIC, 0 } });
+    consumer.assign({ { KAFKA_TOPICS[0], 0 } });
 
     {
         ConsumerRunner runner(consumer, 0, 1);
@@ -230,19 +224,19 @@ TEST_F(ConsumerTest, ConsumeBatch) {
     BufferedProducer<string> producer(make_producer_config());
     string payload = "Hello world!";
     // Produce it twice
-    producer.produce(MessageBuilder(KAFKA_TOPIC).partition(partition).payload(payload));
-    producer.produce(MessageBuilder(KAFKA_TOPIC).partition(partition).payload(payload));
+    producer.produce(MessageBuilder(KAFKA_TOPICS[0]).partition(partition).payload(payload));
+    producer.produce(MessageBuilder(KAFKA_TOPICS[0]).partition(partition).payload(payload));
     producer.flush();
 
-    vector<Message> all_messages;
+    MessageList all_messages;
     int i = 0;
     while (i < 5 && all_messages.size() != 2) {
-        vector<Message> messages = consumer.poll_batch(2);
+        MessageList messages = consumer.poll_batch(2);
         all_messages.insert(all_messages.end(), make_move_iterator(messages.begin()),
                             make_move_iterator(messages.end()));
         ++i;
     }
-    ASSERT_EQ(2, all_messages.size());
-    EXPECT_EQ(payload, all_messages[0].get_payload());
-    EXPECT_EQ(payload, all_messages[1].get_payload());
+    REQUIRE(all_messages.size() == 2);
+    CHECK(all_messages[0].get_payload() == payload);
+    CHECK(all_messages[1].get_payload() == payload);
 }
