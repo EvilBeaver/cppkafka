@@ -24,6 +24,8 @@ using std::condition_variable;
 using std::chrono::system_clock;
 using std::chrono::seconds;
 using std::chrono::milliseconds;
+using std::chrono::time_point;
+using std::chrono::duration_cast;
 using std::ref;
 
 using namespace cppkafka;
@@ -42,7 +44,7 @@ static Configuration make_consumer_config() {
     Configuration config = {
         { "metadata.broker.list", KAFKA_TEST_INSTANCE },
         { "enable.auto.commit", false },
-        { "group.id", "producer_test" },
+        { "group.id", make_consumer_group_id() },
         { "api.version.request", true }
     };
     return config;
@@ -164,7 +166,7 @@ TEST_CASE("simple production", "[producer]") {
     SECTION("message with key") {
         const string payload = "Hello world! 2";
         const string key = "such key";
-        const milliseconds timestamp{15};
+        auto timestamp = system_clock::now();
         Producer producer(config);
         producer.produce(MessageBuilder(KAFKA_TOPICS[0]).partition(partition)
                                                      .key(key)
@@ -181,8 +183,45 @@ TEST_CASE("simple production", "[producer]") {
         CHECK(message.get_partition() == partition);
         CHECK(!!message.get_error() == false);
         REQUIRE(!!message.get_timestamp() == true);
-        CHECK(message.get_timestamp()->get_timestamp() == timestamp);
+        CHECK(message.get_timestamp()->get_timestamp() == duration_cast<milliseconds>(timestamp.time_since_epoch()));
     }
+    
+#if (RD_KAFKA_VERSION >= RD_KAFKA_HEADERS_SUPPORT_VERSION)
+    SECTION("message with key and move-able headers") {
+        using Hdr = MessageBuilder::HeaderType;
+        const string payload = "Hello world! 2";
+        const string key = "such key";
+        const string header1, header2 = "", header3 = "header3";
+        
+        const milliseconds timestamp{15};
+        Producer producer(config);
+        producer.produce(MessageBuilder(KAFKA_TOPICS[0]).partition(partition)
+                                                     .key(key)
+                                                     .payload(payload)
+                                                     .timestamp(timestamp)
+                                                     .header(Hdr{})
+                                                     .header(Hdr{"", header2})
+                                                     .header(Hdr{"header3", header3}));
+        runner.try_join();
+
+        const auto& messages = runner.get_messages();
+        REQUIRE(messages.size() == 1);
+        const auto& message = messages[0];
+        CHECK(message.get_payload() == payload);
+        CHECK(message.get_key() == key);
+        CHECK(message.get_topic() == KAFKA_TOPICS[0]);
+        CHECK(message.get_partition() == partition);
+        CHECK(!!message.get_error() == false);
+        REQUIRE(!!message.get_timestamp() == true);
+        CHECK(message.get_timestamp()->get_timestamp() == timestamp);
+        //validate headers
+        REQUIRE(!!message.get_header_list());
+        REQUIRE(message.get_header_list().size() == 3);
+        CHECK(message.get_header_list().front() == Hdr{});
+        CHECK(message.get_header_list().at(1) == Hdr{"", header2});
+        CHECK(message.get_header_list().back() == Hdr{"header3", header3});
+    }
+#endif //RD_KAFKA_HEADERS_SUPPORT_VERSION
     
     SECTION("message without message builder") {
         const string payload = "Goodbye cruel world!";
@@ -314,6 +353,52 @@ TEST_CASE("multiple messages", "[producer]") {
         CHECK(message.get_partition() < KAFKA_NUM_PARTITIONS);
     }
 }
+
+#if (RD_KAFKA_VERSION >= RD_KAFKA_HEADERS_SUPPORT_VERSION)
+TEST_CASE("multiple messages with copy-able headers", "[producer][headers]") {
+    using Hdr = MessageBuilder::HeaderType;
+    size_t message_count = 2;
+    string payload = "Hello world with headers";
+    const string header1, header2 = "", header3 = "header3";
+
+    // Create a consumer and subscribe to this topic
+    Consumer consumer(make_consumer_config());
+    consumer.subscribe({ KAFKA_TOPICS[0] });
+    ConsumerRunner runner(consumer, message_count, KAFKA_NUM_PARTITIONS);
+
+    // Now create a producer and produce a message
+    Producer producer(make_producer_config());
+    MessageBuilder builder(KAFKA_TOPICS[0]);
+    builder.payload(payload)
+             .header(Hdr{})
+             .header(Hdr{"", header2})
+             .header(Hdr{"header3", header3});
+    producer.produce(builder);
+    producer.produce(builder);
+    
+    //Check we still have the messages after production
+    CHECK(!!builder.header_list());
+    CHECK(builder.header_list().size() == 3);
+    
+    runner.try_join();
+
+    const auto& messages = runner.get_messages();
+    REQUIRE(messages.size() == message_count);
+    const auto& message = messages[0];
+    CHECK(message.get_payload() == payload);
+    CHECK(!!message.get_error() == false);
+    //validate headers
+    REQUIRE(!!message.get_header_list());
+    REQUIRE(message.get_header_list().size() == 3);
+    CHECK(message.get_header_list().front() == Hdr{});
+    CHECK(message.get_header_list().at(1) == Hdr{"", header2});
+    CHECK(message.get_header_list().back() == Hdr{"header3", header3});
+    
+    //validate second message
+    CHECK(messages[0].get_header_list() == messages[1].get_header_list());
+    CHECK(messages[0].get_header_list().get_handle() != messages[1].get_header_list().get_handle());
+}
+#endif //RD_KAFKA_HEADERS_SUPPORT_VERSION
 
 TEST_CASE("multiple sync messages", "[producer][buffered_producer][sync]") {
     size_t message_count = 10;

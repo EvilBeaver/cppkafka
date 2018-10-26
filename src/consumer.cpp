@@ -29,6 +29,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include "macros.h"
 #include "consumer.h"
 #include "exceptions.h"
 #include "logging.h"
@@ -44,8 +45,18 @@ using std::ostringstream;
 using std::chrono::milliseconds;
 using std::toupper;
 using std::equal;
+using std::allocator;
 
 namespace cppkafka {
+
+Queue Consumer::get_queue(rd_kafka_queue_t* handle) {
+    if (rd_kafka_version() <= RD_KAFKA_QUEUE_REFCOUNT_BUG_VERSION) {
+        return Queue::make_non_owning(handle);
+    }
+    else {
+        return Queue(handle);
+    }
+}
 
 void Consumer::rebalance_proxy(rd_kafka_t*, rd_kafka_resp_err_t error,
                                rd_kafka_topic_partition_list_t *partitions, void *opaque) {
@@ -88,10 +99,10 @@ Consumer::~Consumer() {
             error_cb(*this, static_cast<int>(ex.get_error().get_error()), error_msg.str());
         }
         else if (logger_cb) {
-            logger_cb(*this, static_cast<int>(LogLevel::LOG_ERR), "cppkafka", error_msg.str());
+            logger_cb(*this, static_cast<int>(LogLevel::LogErr), "cppkafka", error_msg.str());
         }
         else {
-            rd_kafka_log_print(get_handle(), static_cast<int>(LogLevel::LOG_ERR), "cppkafka", error_msg.str().c_str());
+            rd_kafka_log_print(get_handle(), static_cast<int>(LogLevel::LogErr), "cppkafka", error_msg.str().c_str());
         }
     }
 }
@@ -244,37 +255,28 @@ Message Consumer::poll(milliseconds timeout) {
     return rd_kafka_consumer_poll(get_handle(), static_cast<int>(timeout.count()));
 }
 
-MessageList Consumer::poll_batch(size_t max_batch_size) {
-    return poll_batch(max_batch_size, get_timeout());
+std::vector<Message> Consumer::poll_batch(size_t max_batch_size) {
+    return poll_batch(max_batch_size, get_timeout(), allocator<Message>());
 }
 
-MessageList Consumer::poll_batch(size_t max_batch_size, milliseconds timeout) {
-    vector<rd_kafka_message_t*> raw_messages(max_batch_size);
-    rd_kafka_queue_t* queue = rd_kafka_queue_get_consumer(get_handle());
-    ssize_t result = rd_kafka_consume_batch_queue(queue, timeout.count(), raw_messages.data(),
-                                                  raw_messages.size());
-    if (result == -1) {
-        check_error(rd_kafka_last_error());
-        // on the off-chance that check_error() does not throw an error
-        return MessageList();
-    }
-    return MessageList(raw_messages.begin(), raw_messages.begin() + result);
+std::vector<Message> Consumer::poll_batch(size_t max_batch_size, milliseconds timeout) {
+    return poll_batch(max_batch_size, timeout, allocator<Message>());
 }
 
 Queue Consumer::get_main_queue() const {
-    Queue queue(Queue::make_non_owning(rd_kafka_queue_get_main(get_handle())));
+    Queue queue(get_queue(rd_kafka_queue_get_main(get_handle())));
     queue.disable_queue_forwarding();
     return queue;
 }
 
 Queue Consumer::get_consumer_queue() const {
-    return Queue::make_non_owning(rd_kafka_queue_get_consumer(get_handle()));
+    return get_queue(rd_kafka_queue_get_consumer(get_handle()));
 }
 
 Queue Consumer::get_partition_queue(const TopicPartition& partition) const {
-    Queue queue(Queue::make_non_owning(rd_kafka_queue_get_partition(get_handle(),
-                                                                    partition.get_topic().c_str(),
-                                                                    partition.get_partition())));
+    Queue queue(get_queue(rd_kafka_queue_get_partition(get_handle(),
+                                                       partition.get_topic().c_str(),
+                                                       partition.get_partition())));
     queue.disable_queue_forwarding();
     return queue;
 }

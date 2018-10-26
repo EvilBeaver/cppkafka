@@ -1,7 +1,6 @@
 #include <mutex>
 #include <chrono>
 #include <condition_variable>
-#include "test_utils.h"
 #include "cppkafka/utils/consumer_dispatcher.h"
 
 using std::vector;
@@ -19,7 +18,6 @@ using cppkafka::Consumer;
 using cppkafka::BasicConsumerDispatcher;
 
 using cppkafka::Message;
-using cppkafka::MessageList;
 using cppkafka::TopicPartition;
 
 //==================================================================================
@@ -46,7 +44,8 @@ BasicConsumerRunner<ConsumerType>::BasicConsumerRunner(ConsumerType& consumer,
                 }
             },
             // EOF callback
-            [&](typename BasicConsumerDispatcher<ConsumerType>::EndOfFile, const TopicPartition& topic_partition) {
+            [&](typename BasicConsumerDispatcher<ConsumerType>::EndOfFile,
+                const TopicPartition& topic_partition) {
                 if (number_eofs != partitions) {
                     number_eofs++;
                     if (number_eofs == partitions) {
@@ -89,7 +88,7 @@ BasicConsumerRunner<ConsumerType>::~BasicConsumerRunner() {
 }
 
 template <typename ConsumerType>
-const MessageList& BasicConsumerRunner<ConsumerType>::get_messages() const {
+const std::vector<Message>& BasicConsumerRunner<ConsumerType>::get_messages() const {
     return messages_;
 }
 
@@ -98,75 +97,6 @@ void BasicConsumerRunner<ConsumerType>::try_join() {
     if (thread_.joinable()) {
         thread_.join();
     }
-}
-
-//==================================================================================
-//                           PollStrategyAdapter
-//==================================================================================
-inline
-PollStrategyAdapter::PollStrategyAdapter(Configuration config)
- : Consumer(config) {
-}
-
-inline
-void PollStrategyAdapter::add_polling_strategy(std::unique_ptr<PollInterface> poll_strategy) {
-    strategy_ = std::move(poll_strategy);
-}
-
-inline
-void PollStrategyAdapter::delete_polling_strategy() {
-    strategy_.reset();
-}
-
-inline
-Message PollStrategyAdapter::poll() {
-    if (strategy_) {
-        return strategy_->poll();
-    }
-    return Consumer::poll();
-}
-
-inline
-Message PollStrategyAdapter::poll(milliseconds timeout) {
-    if (strategy_) {
-        return strategy_->poll(timeout);
-    }
-    return Consumer::poll(timeout);
-}
-
-inline
-MessageList PollStrategyAdapter::poll_batch(size_t max_batch_size) {
-    if (strategy_) {
-        return strategy_->poll_batch(max_batch_size);
-    }
-    return Consumer::poll_batch(max_batch_size);
-}
-
-inline
-MessageList PollStrategyAdapter::poll_batch(size_t max_batch_size,
-                                           milliseconds timeout) {
-    if (strategy_) {
-        return strategy_->poll_batch(max_batch_size, timeout);
-    }
-    return Consumer::poll_batch(max_batch_size, timeout);
-}
-
-inline
-void PollStrategyAdapter::set_timeout(milliseconds timeout) {
-    if (strategy_) {
-        strategy_->set_timeout(timeout);
-    }
-    else {
-        Consumer::set_timeout(timeout);
-    }
-}
-
-inline
-milliseconds PollStrategyAdapter::get_timeout() {
-    if (strategy_) {
-        return strategy_->get_timeout();
-    }
-    return Consumer::get_timeout();
 }
 
 

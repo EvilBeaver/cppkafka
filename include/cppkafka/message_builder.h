@@ -35,6 +35,7 @@
 #include "topic.h"
 #include "macros.h"
 #include "message.h"
+#include "header_list.h"
 
 namespace cppkafka {
 
@@ -44,6 +45,10 @@ namespace cppkafka {
 template <typename BufferType, typename Concrete>
 class BasicMessageBuilder {
 public:
+#if (RD_KAFKA_VERSION >= RD_KAFKA_HEADERS_SUPPORT_VERSION)
+    using HeaderType = Header<BufferType>;
+    using HeaderListType = HeaderList<HeaderType>;
+#endif
     /**
      * Construct a BasicMessageBuilder
      *
@@ -99,6 +104,15 @@ public:
      */
     Concrete& key(BufferType&& value);
 
+#if (RD_KAFKA_VERSION >= RD_KAFKA_HEADERS_SUPPORT_VERSION)
+    /**
+     *  Add a header to the message
+     *
+     * \param header The header to be used
+     */
+    Concrete& header(const HeaderType& header);
+#endif
+    
     /**
      * Sets the message's payload
      *
@@ -114,11 +128,19 @@ public:
     Concrete& payload(BufferType&& value);
 
     /**
-     * Sets the message's timestamp
+     * Sets the message's timestamp with a 'duration'
      *
      * \param value The timestamp to be used
      */
     Concrete& timestamp(std::chrono::milliseconds value);
+    
+    /**
+     * Sets the message's timestamp with a 'time_point'.
+     *
+     * \param value The timestamp to be used
+     */
+    template <typename Clock, typename Duration = typename Clock::duration>
+    Concrete& timestamp(std::chrono::time_point<Clock, Duration> value);
 
     /**
      * Sets the message's user data pointer
@@ -146,7 +168,19 @@ public:
      * Gets the message's key
      */
     BufferType& key();
-
+    
+#if (RD_KAFKA_VERSION >= RD_KAFKA_HEADERS_SUPPORT_VERSION)
+    /**
+     * Gets the list of headers
+     */
+    const HeaderListType& header_list() const;
+    
+    /**
+     * Gets the list of headers
+     */
+    HeaderListType& header_list();
+#endif
+    
     /**
      * Gets the message's payload
      */
@@ -158,7 +192,8 @@ public:
     BufferType& payload();
 
     /**
-     * Gets the message's timestamp
+     * Gets the message's timestamp as a duration. If the timestamp was created with a 'time_point',
+     * the duration represents the number of milliseconds since epoch.
      */
     std::chrono::milliseconds timestamp() const;
 
@@ -180,6 +215,9 @@ private:
     std::string topic_;
     int partition_{-1};
     BufferType key_;
+#if (RD_KAFKA_VERSION >= RD_KAFKA_HEADERS_SUPPORT_VERSION)
+    HeaderListType header_list_;
+#endif
     BufferType payload_;
     std::chrono::milliseconds timestamp_{0};
     void* user_data_;
@@ -237,6 +275,17 @@ C& BasicMessageBuilder<T, C>::key(T&& value) {
     return get_concrete();
 }
 
+#if (RD_KAFKA_VERSION >= RD_KAFKA_HEADERS_SUPPORT_VERSION)
+template <typename T, typename C>
+C& BasicMessageBuilder<T, C>::header(const HeaderType& header) {
+    if (!header_list_) {
+        header_list_ = HeaderListType(5);
+    }
+    header_list_.add(header);
+    return get_concrete();
+}
+#endif
+
 template <typename T, typename C>
 C& BasicMessageBuilder<T, C>::payload(const T& value) {
     get_concrete().construct_buffer(payload_, value);
@@ -252,6 +301,14 @@ C& BasicMessageBuilder<T, C>::payload(T&& value) {
 template <typename T, typename C>
 C& BasicMessageBuilder<T, C>::timestamp(std::chrono::milliseconds value) {
     timestamp_ = value;
+    return get_concrete();
+}
+
+template <typename T, typename C>
+template <typename Clock, typename Duration>
+C& BasicMessageBuilder<T, C>::timestamp(std::chrono::time_point<Clock, Duration> value)
+{
+    timestamp_ = std::chrono::duration_cast<std::chrono::milliseconds>(value.time_since_epoch());
     return get_concrete();
 }
 
@@ -280,6 +337,20 @@ template <typename T, typename C>
 T& BasicMessageBuilder<T, C>::key() {
     return key_;
 }
+
+#if (RD_KAFKA_VERSION >= RD_KAFKA_HEADERS_SUPPORT_VERSION)
+template <typename T, typename C>
+const typename BasicMessageBuilder<T, C>::HeaderListType&
+BasicMessageBuilder<T, C>::header_list() const {
+    return header_list_;
+}
+
+template <typename T, typename C>
+typename BasicMessageBuilder<T, C>::HeaderListType&
+BasicMessageBuilder<T, C>::header_list() {
+    return header_list_;
+}
+#endif
 
 template <typename T, typename C>
 const T& BasicMessageBuilder<T, C>::payload() const {
@@ -338,7 +409,12 @@ C& BasicMessageBuilder<T, C>::get_concrete() {
  */
 class MessageBuilder : public BasicMessageBuilder<Buffer, MessageBuilder> {
 public:
+    using Base = BasicMessageBuilder<Buffer, MessageBuilder>;
     using BasicMessageBuilder::BasicMessageBuilder;
+#if (RD_KAFKA_VERSION >= RD_KAFKA_HEADERS_SUPPORT_VERSION)
+    using HeaderType = Base::HeaderType;
+    using HeaderListType = Base::HeaderListType;
+#endif
 
     void construct_buffer(Buffer& lhs, const Buffer& rhs) {
         lhs = Buffer(rhs.get_data(), rhs.get_size());

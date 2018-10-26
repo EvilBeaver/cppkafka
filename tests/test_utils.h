@@ -1,6 +1,7 @@
 #ifndef CPPKAFKA_TEST_UTILS_H
 #define CPPKAFKA_TEST_UTILS_H
 
+#include <string>
 #include <thread>
 #include <vector>
 #include "cppkafka/consumer.h"
@@ -48,17 +49,22 @@ public:
     void delete_polling_strategy();
     Message poll();
     Message poll(std::chrono::milliseconds timeout);
-    MessageList poll_batch(size_t max_batch_size);
-    MessageList poll_batch(size_t max_batch_size,
-                           std::chrono::milliseconds timeout);
+    std::vector<Message> poll_batch(size_t max_batch_size);
+    std::vector<Message> poll_batch(size_t max_batch_size,
+                                    std::chrono::milliseconds timeout);
     void set_timeout(std::chrono::milliseconds timeout);
     std::chrono::milliseconds get_timeout();
 private:
     std::unique_ptr<PollInterface> strategy_;
 };
 
+// Misc
+
+std::string make_consumer_group_id();
+
 using PollConsumerRunner = BasicConsumerRunner<PollStrategyAdapter>;
 using ConsumerRunner = BasicConsumerRunner<Consumer>;
+
 
 #include "test_utils_impl.h"
 
